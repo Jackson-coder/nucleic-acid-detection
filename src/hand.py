@@ -1,3 +1,4 @@
+import sys
 import cv2
 import json
 import numpy as np
@@ -12,10 +13,13 @@ from skimage.measure import label
 from src.model import handpose_model
 from src import util
 
+
 class Hand(object):
-    def __init__(self, model_path):
+    def __init__(self, model_path, fp16=False):
         self.model = handpose_model()
         if torch.cuda.is_available():
+            if fp16:
+                self.model = self.model.half()
             self.model = self.model.cuda()
         model_dict = util.transfer(self.model, torch.load(model_path))
         self.model.load_state_dict(model_dict)
@@ -44,8 +48,9 @@ class Hand(object):
                 data = data.cuda()
             # data = data.permute([2, 0, 1]).unsqueeze(0).float()
             with torch.no_grad():
+                # print(data.shape)
                 output = self.model(data).cpu().numpy()
-                # output = self.model(data).numpy()q
+                # output = self.model(data).numpy()
 
             # extract outputs, resize, and remove padding
             heatmap = np.transpose(np.squeeze(output), (1, 2, 0))  # output 1 is heatmaps
@@ -81,5 +86,8 @@ if __name__ == "__main__":
     oriImg = cv2.imread(test_image)  # B,G,R order
     peaks = hand_estimation(oriImg)
     canvas = util.draw_handpose(oriImg, peaks, True)
+    
+    cv2.imwrite('out.jpg',canvas)
+    
     cv2.imshow('', canvas)
     cv2.waitKey(0)

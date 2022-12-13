@@ -38,7 +38,7 @@ for x, y, w, is_left in hands_list:
     all_hand_peaks.append(peaks)
 
 canvas = util.draw_handpose(canvas, all_hand_peaks)
-
-plt.imshow(canvas[:, :, [2, 1, 0]])
-plt.axis('off')
-plt.show()
+cv2.imwrite('out.jpg',canvas)
+# plt.imshow(canvas[:, :, [2, 1, 0]])
+# plt.axis('off')
+# plt.show()

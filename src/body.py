@@ -12,9 +12,11 @@ from src import util
 from src.model import bodypose_model
 
 class Body(object):
-    def __init__(self, model_path):
+    def __init__(self, model_path, fp16=False):
         self.model = bodypose_model()
         if torch.cuda.is_available():
+            if fp16:
+                self.model = self.model.half()
             self.model = self.model.cuda()
         model_dict = util.transfer(self.model, torch.load(model_path))
         self.model.load_state_dict(model_dict)
@@ -28,10 +30,12 @@ class Body(object):
         padValue = 128
         thre1 = 0.1
         thre2 = 0.05
+        
         multiplier = [x * boxsize / oriImg.shape[0] for x in scale_search]
         heatmap_avg = np.zeros((oriImg.shape[0], oriImg.shape[1], 19))
         paf_avg = np.zeros((oriImg.shape[0], oriImg.shape[1], 38))
-
+        
+        # T0=time.time()
         for m in range(len(multiplier)):
             scale = multiplier[m]
             imageToTest = cv2.resize(oriImg, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
@@ -42,9 +46,11 @@ class Body(object):
             data = torch.from_numpy(im).float()
             if torch.cuda.is_available():
                 data = data.cuda()
+            # print(data.shape)
             # data = data.permute([2, 0, 1]).unsqueeze(0).float()
             with torch.no_grad():
                 Mconv7_stage6_L1, Mconv7_stage6_L2 = self.model(data)
+            # T1=time.time()
             Mconv7_stage6_L1 = Mconv7_stage6_L1.cpu().numpy()
             Mconv7_stage6_L2 = Mconv7_stage6_L2.cpu().numpy()
 
@@ -54,16 +60,17 @@ class Body(object):
             heatmap = cv2.resize(heatmap, (0, 0), fx=stride, fy=stride, interpolation=cv2.INTER_CUBIC)
             heatmap = heatmap[:imageToTest_padded.shape[0] - pad[2], :imageToTest_padded.shape[1] - pad[3], :]
             heatmap = cv2.resize(heatmap, (oriImg.shape[1], oriImg.shape[0]), interpolation=cv2.INTER_CUBIC)
-
             # paf = np.transpose(np.squeeze(net.blobs[output_blobs.keys()[0]].data), (1, 2, 0))  # output 0 is PAFs
             paf = np.transpose(np.squeeze(Mconv7_stage6_L1), (1, 2, 0))  # output 0 is PAFs
             paf = cv2.resize(paf, (0, 0), fx=stride, fy=stride, interpolation=cv2.INTER_CUBIC)
             paf = paf[:imageToTest_padded.shape[0] - pad[2], :imageToTest_padded.shape[1] - pad[3], :]
             paf = cv2.resize(paf, (oriImg.shape[1], oriImg.shape[0]), interpolation=cv2.INTER_CUBIC)
+            
 
             heatmap_avg += heatmap_avg + heatmap / len(multiplier)
             paf_avg += + paf / len(multiplier)
-
+        # T2=time.time()
+            
         all_peaks = []
         peak_counter = 0
 
@@ -89,7 +96,7 @@ class Body(object):
 
             all_peaks.append(peaks_with_score_and_id)
             peak_counter += len(peaks)
-
+        # T3=time.time()
         # find connection in the specified sequence, center 29 is in the position 15
         limbSeq = [[2, 3], [2, 6], [3, 4], [4, 5], [6, 7], [7, 8], [2, 9], [9, 10], \
                    [10, 11], [2, 12], [12, 13], [13, 14], [2, 1], [1, 15], [15, 17], \
@@ -149,7 +156,7 @@ class Body(object):
             else:
                 special_k.append(k)
                 connection_all.append([])
-
+        # T4=time.time()
         # last number in each row is the total parts number of that person
         # the second last number in each row is the score of the overall configuration
         subset = -1 * np.ones((0, 20))
@@ -196,13 +203,19 @@ class Body(object):
                         row[-1] = 2
                         row[-2] = sum(candidate[connection_all[k][i, :2].astype(int), 2]) + connection_all[k][i][2]
                         subset = np.vstack([subset, row])
+        # T5=time.time()
         # delete some rows of subset which has few parts occur
         deleteIdx = []
         for i in range(len(subset)):
             if subset[i][-1] < 4 or subset[i][-2] / subset[i][-1] < 0.4:
                 deleteIdx.append(i)
         subset = np.delete(subset, deleteIdx, axis=0)
-
+        # T6=time.time()
+        # print("0:",T1-T0)
+        # print("1:",T2-T1)
+        # print("2:",T3-T2)
+        # print("3:",T4-T3)
+        # print("4:",T5-T4)
         # subset: n*20 array, 0-17 is the index in candidate, 18 is the total score, 19 is the total parts
         # candidate: x, y, score, id
         return candidate, subset
